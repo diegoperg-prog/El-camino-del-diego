@@ -7,7 +7,7 @@ import "./App.css";
 const fmt = (d) =>
   new Date(d.getFullYear(), d.getMonth(), d.getDate())
     .toISOString()
-    .slice(0, 10); // YYYY-MM-DD
+    .slice(0, 10);
 
 const getISOWeek = (date) => {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -53,26 +53,22 @@ function Modal({ title, onClose, children }) {
  *  App
  *  ========================= */
 export default function App() {
-  // ---------- Estado principal ----------
   const [dailyPoints, setDailyPoints] = useState(0);
   const [weeklyPoints, setWeeklyPoints] = useState(0);
   const [monthlyPoints, setMonthlyPoints] = useState(0);
-
-  const [history, setHistory] = useState({}); // { 'YYYY-MM-DD': number }
+  const [history, setHistory] = useState({});
   const [currentStreak, setCurrentStreak] = useState(0);
   const [longestStreak, setLongestStreak] = useState(0);
-
   const [reward, setReward] = useState("Recompensa: plan con amigos 🍕");
   const [showSettings, setShowSettings] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
   const [showBalance, setShowBalance] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(null); // "daily" | "weekly" | "monthly" | null
-
-  // +puntos flotantes
-  const [floaters, setFloaters] = useState([]); // [{id, text}]
+  const [showFrequency, setShowFrequency] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(null);
+  const [floaters, setFloaters] = useState([]);
+  const [actionLog, setActionLog] = useState([]);
   let floaterId = useMemo(() => 0, []);
 
-  // ---------- Actividades con íconos ----------
   const activities = [
     { label: "Entrené", pts: 10, icon: "🏋️‍♂️" },
     { label: "Caminé 30 min", pts: 5, icon: "🚶" },
@@ -85,7 +81,6 @@ export default function App() {
     { label: "Mejoré proceso", pts: 10, icon: "⚙️" },
   ];
 
-  // ---------- Niveles por días del mes ----------
   const levelNames = [
     "El llamado a la aventura",
     "Primeros pasos",
@@ -104,7 +99,6 @@ export default function App() {
     return { level: idx + 1, day: d, daysInMonth: mDays };
   }, []);
 
-  // Fondos por nivel
   const levelBackgrounds = {
     1: "/assets/backgrounds/bg1_forest.png",
     2: "/assets/backgrounds/bg2_village.png",
@@ -114,19 +108,17 @@ export default function App() {
     6: "/assets/backgrounds/bg6_legend.png",
   };
 
-  // Objetivo diario por etapa
   const stagePercents = [0.8, 0.9, 1.0, 1.1, 1.2, 1.0];
   const baseDailyTarget = 50;
   const levelTarget = Math.max(10, Math.round(baseDailyTarget * stagePercents[level - 1]));
   const expPercent = Math.min(100, Math.round((dailyPoints / levelTarget) * 100));
 
-  // ---------- Persistencia ----------
   const today = new Date();
   const todayKey = fmt(today);
   const wKey = weekKeyOf(today);
   const mKey = monthKeyOf(today);
 
-  // Cargar
+  /** ========= Persistencia ========= **/
   useEffect(() => {
     const raw = localStorage.getItem("dp_v3");
     if (raw) {
@@ -139,26 +131,13 @@ export default function App() {
         setCurrentStreak(s.currentStreak || 0);
         setLongestStreak(s.longestStreak || 0);
         setReward(s.reward || "Recompensa: plan con amigos 🍕");
-
-        // Detección de día/semana/mes nuevos → pedir confirmación
-        if (s.todayKey && s.todayKey !== todayKey) {
-          setConfirmReset("daily"); // reset diario (solo pone a cero dailyPoints)
-        }
-        if (s.weekKey && s.weekKey !== wKey) {
-          setConfirmReset((prev) => prev || "weekly");
-        }
-        if (s.monthKey && s.monthKey !== mKey) {
-          setConfirmReset((prev) => prev || "monthly");
-        }
-      } catch (e) {
-        console.warn("Estado corrupto, reiniciando.");
-      }
+        if (Array.isArray(s.actionLog)) setActionLog(s.actionLog || []);
+      } catch {}
     }
-  }, []); // eslint-disable-line
+  }, []);
 
-  // Guardar
   useEffect(() => {
-    const state = {
+    const s = {
       todayKey,
       weekKey: wKey,
       monthKey: mKey,
@@ -169,60 +148,24 @@ export default function App() {
       currentStreak,
       longestStreak,
       reward,
+      actionLog,
     };
-    localStorage.setItem("dp_v3", JSON.stringify(state));
-  }, [
-    todayKey,
-    wKey,
-    mKey,
-    dailyPoints,
-    weeklyPoints,
-    monthlyPoints,
-    history,
-    currentStreak,
-    longestStreak,
-    reward,
-  ]);
+    localStorage.setItem("dp_v3", JSON.stringify(s));
+  }, [todayKey, wKey, mKey, dailyPoints, weeklyPoints, monthlyPoints, history, currentStreak, longestStreak, reward, actionLog]);
 
-  // Pre-carga fondos
-  useEffect(() => {
-    Object.values(levelBackgrounds).forEach((src) => {
-      const img = new Image();
-      img.src = src;
-    });
-  }, []);
-
-  // ---------- Acciones ----------
-  const addPoints = (pts) => {
-    // sumar puntos
+  /** ========= Acciones ========= **/
+  const addPoints = (pts, label) => {
     setDailyPoints((p) => p + pts);
     setWeeklyPoints((p) => p + pts);
     setMonthlyPoints((p) => p + pts);
+    setHistory((h) => ({ ...h, [todayKey]: (h[todayKey] || 0) + pts }));
+    setActionLog((a) => [...a, { date: todayKey, label, pts }]);
 
-    // registrar en historial del día
-    setHistory((h) => {
-      const next = { ...h, [todayKey]: (h[todayKey] || 0) + pts };
-      // streaks
-      const yesterdayKey = fmt(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1));
-      const didYesterday = next[yesterdayKey] > 0;
-      const todayNow = next[todayKey] > 0;
-      setCurrentStreak((cs) => {
-        const ns = todayNow ? (didYesterday ? cs + 1 : 1) : cs;
-        setLongestStreak((ls) => (ns > ls ? ns : ls));
-        return ns;
-      });
-      return next;
-    });
-
-    // +puntos flotantes
     const id = (floaterId = floaterId + 1);
     setFloaters((arr) => [...arr, { id, text: `+${pts}` }]);
-    setTimeout(() => {
-      setFloaters((arr) => arr.filter((f) => f.id !== id));
-    }, 1200);
+    setTimeout(() => setFloaters((arr) => arr.filter((f) => f.id !== id)), 1200);
   };
 
-  // 🔄 Corrección: borrar entradas del día (ahora descuenta del semanal y mensual)
   const clearToday = () => {
     const ptsToday = history[todayKey] || 0;
     setDailyPoints(0);
@@ -235,25 +178,7 @@ export default function App() {
     });
   };
 
-  // 🧭 Registro de acciones para estadísticas de frecuencia
-  const [actionLog, setActionLog] = useState([]); // [{date, label, pts}]
-  const [showFrequency, setShowFrequency] = useState(false);
-
-  // Guardar acción al presionar botón
-  const addPoints = (pts, label) => {
-    setDailyPoints((p) => p + pts);
-    setWeeklyPoints((p) => p + pts);
-    setMonthlyPoints((p) => p + pts);
-    setHistory((h) => ({ ...h, [todayKey]: (h[todayKey] || 0) + pts }));
-    setActionLog((a) => [...a, { date: todayKey, label, pts }]);
-
-    // +puntos flotantes
-    const id = (floaterId = floaterId + 1);
-    setFloaters((arr) => [...arr, { id, text: `+${pts}` }]);
-    setTimeout(() => setFloaters((arr) => arr.filter((f) => f.id !== id)), 1200);
-  };
-
-  // Frecuencia últimos 7 y 30 días
+  /** ========= Frecuencia ========= **/
   const freqStats = useMemo(() => {
     const last7Days = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 7);
     const last30Days = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 30);
@@ -276,47 +201,7 @@ export default function App() {
       .sort((a, b) => b.count30 - a.count30);
   }, [actionLog, todayKey]);
 
-  // Persistencia extendida con actionLog
-  useEffect(() => {
-    const raw = localStorage.getItem("dp_v3");
-    if (raw) {
-      try {
-        const s = JSON.parse(raw);
-        if (Array.isArray(s.actionLog)) setActionLog(s.actionLog);
-      } catch {}
-    }
-  }, []);
-  useEffect(() => {
-    const raw = localStorage.getItem("dp_v3");
-    const s = raw ? JSON.parse(raw) : {};
-    s.actionLog = actionLog;
-    localStorage.setItem("dp_v3", JSON.stringify(s));
-  }, [actionLog]);
-
-
-  // Confirmaciones de reset (inteligente semanal/mensual)
-  const confirmResetAction = () => {
-    if (confirmReset === "monthly") {
-      setMonthlyPoints(0);
-      setWeeklyPoints(0);
-      setDailyPoints(0);
-      setConfirmReset(null);
-      return;
-    }
-    if (confirmReset === "weekly") {
-      setWeeklyPoints(0);
-      setDailyPoints(0);
-      setConfirmReset(null);
-      return;
-    }
-    if (confirmReset === "daily") {
-      setDailyPoints(0);
-      setConfirmReset(null);
-      return;
-    }
-  };
-
-  // ---------- Semanal (últimos 7 días) ----------
+  /** ========= Render ========= **/
   const last7 = useMemo(() => {
     const out = [];
     for (let i = 6; i >= 0; i--) {
@@ -325,44 +210,29 @@ export default function App() {
       out.push({ key: k, label: d.toLocaleDateString("es-AR", { weekday: "short" }), pts: history[k] || 0 });
     }
     return out;
-  }, [todayKey, history]); // rehacer cuando cambia día o history
+  }, [todayKey, history]);
 
   const weekTotal = last7.reduce((a, b) => a + b.pts, 0);
-
-  // ---------- Insights simples ----------
-  const insight = useMemo(() => {
-    // ejemplo: si no llegó al 40% del objetivo del día, recomendar algo
-    if (dailyPoints < levelTarget * 0.4) {
-      return "Vas bien; sumar una caminata de 30' o reflexión te acerca al objetivo de hoy.";
-    }
-    if (dailyPoints >= levelTarget) {
-      return "¡Objetivo diario cumplido! Probá una recompensa breve para consolidar el hábito.";
-    }
-    return advicePool[Math.floor(Math.random() * advicePool.length)];
-  }, [dailyPoints, levelTarget, todayKey]);
-
-  // ---------- Balance mensual ----------
   const monthlyDaysKeys = useMemo(() => {
     const now = new Date();
     const first = new Date(now.getFullYear(), now.getMonth(), 1);
     const next = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     const arr = [];
-    for (let d = new Date(first); d <= next; d.setDate(d.getDate() + 1)) {
-      arr.push(fmt(d));
-    }
+    for (let d = new Date(first); d <= next; d.setDate(d.getDate() + 1)) arr.push(fmt(d));
     return arr;
   }, [mKey]);
 
   const monthlyTotalReal = monthlyDaysKeys.reduce((sum, k) => sum + (history[k] || 0), 0);
   const monthlyAvg = monthlyDaysKeys.length ? Math.round(monthlyTotalReal / monthlyDaysKeys.length) : 0;
 
-  // ---------- Render ----------
+  const insight = useMemo(() => {
+    if (dailyPoints < levelTarget * 0.4) return "Vas bien; sumar una caminata o reflexión te acerca al objetivo.";
+    if (dailyPoints >= levelTarget) return "¡Objetivo diario cumplido! Tomate una recompensa breve.";
+    return advicePool[Math.floor(Math.random() * advicePool.length)];
+  }, [dailyPoints, levelTarget, todayKey]);
+
   return (
-    <div
-      className="game-container"
-      style={{ backgroundImage: `url(${levelBackgrounds[level]})` }}
-    >
-      {/* HUD */}
+    <div className="game-container" style={{ backgroundImage: `url(${levelBackgrounds[level]})` }}>
       <div className="hud">
         <h1 className="title">Nivel {level}: {levelNames[level - 1]}</h1>
         <div className="subtle">{`Día ${day} / ${daysInMonth}`}</div>
@@ -374,34 +244,26 @@ export default function App() {
           </div>
         </div>
 
-        {/* Barra de XP 50% más gruesa */}
         <div className="xp-bar thick">
           <div className="xp-fill" style={{ width: `${expPercent}%` }} />
         </div>
 
-        {/* XX puntos en la semana debajo de la barra */}
         <div className="weekly">{weeklyPoints} puntos en la semana</div>
 
-        {/* +puntos flotantes */}
         <div className="floaters-wrap" aria-hidden="true">
-          {floaters.map((f) => (
-            <div key={f.id} className="floater">{f.text}</div>
-          ))}
+          {floaters.map((f) => <div key={f.id} className="floater">{f.text}</div>)}
         </div>
 
-        {/* Insights */}
         <div className="insight">{insight}</div>
       </div>
 
-      {/* Personaje */}
       <div className="character-section">
         <img src="/assets/hero.gif" alt="Héroe de Diego" className="hero-sprite" />
       </div>
 
-      {/* Actividades (3x3 con íconos) */}
       <div className="buttons-grid">
         {activities.map((a) => (
-          <button key={a.label} onClick={() => addPoints(a.pts)} className="activity-btn">
+          <button key={a.label} onClick={() => addPoints(a.pts, a.label)} className="activity-btn">
             <span className="ico">{a.icon}</span>
             <span>{a.label}</span>
             <div className="pts">+{a.pts}</div>
@@ -409,37 +271,26 @@ export default function App() {
         ))}
       </div>
 
-      {/* Acciones inferiores */}
       <div className="footer-buttons">
         <button className="circle-btn" onClick={() => setShowSettings(true)} title="Ajustes">⚙️</button>
         <button className="circle-btn" onClick={() => setShowProgress(true)} title="Gráficos">📈</button>
         <button className="circle-btn" onClick={() => setShowBalance(true)} title="Balance mensual">📜</button>
+        <button className="circle-btn" onClick={() => setShowFrequency(true)} title="Frecuencia">📊</button>
       </div>
 
-      {/* Botón borrar entradas del día */}
       <div className="clear-today">
-        <button className="clear-btn" onClick={() => setConfirmReset("daily")}>Borrar entradas de hoy</button>
+        <button className="clear-btn" onClick={clearToday}>Borrar entradas de hoy</button>
       </div>
 
-      {/* Modal Ajustes (recompensa editable) */}
       {showSettings && (
         <Modal title="⚙️ Ajustes" onClose={() => setShowSettings(false)}>
-          <div className="settings-block">
-            <label className="label-small">Tu recompensa</label>
-            <input
-              className="reward-input"
-              value={reward}
-              onChange={(e) => setReward(e.target.value)}
-              placeholder="Escribí tu recompensa…"
-            />
-            <div className="hint">Se guarda automáticamente.</div>
-          </div>
+          <label>Tu recompensa</label>
+          <input className="reward-input" value={reward} onChange={(e) => setReward(e.target.value)} />
         </Modal>
       )}
 
-      {/* Modal Evolución semanal con barras animadas */}
       {showProgress && (
-        <Modal title="📈 Evolución (últimos 7 días)" onClose={() => setShowProgress(false)}>
+        <Modal title="📈 Evolución semanal" onClose={() => setShowProgress(false)}>
           <div className="bars">
             {last7.map((d) => {
               const pct = Math.min(100, Math.round((d.pts / baseDailyTarget) * 100));
@@ -454,16 +305,15 @@ export default function App() {
               );
             })}
           </div>
-          <div className="bars-total">Total 7 días: <b>{weekTotal}</b> pts</div>
+          <div className="bars-total">Total: {weekTotal} pts</div>
         </Modal>
       )}
 
-      {/* Modal Balance mensual */}
       {showBalance && (
-        <Modal title="📜 Balance general mensual" onClose={() => setShowBalance(false)}>
+        <Modal title="📜 Balance mensual" onClose={() => setShowBalance(false)}>
           <div className="balance-grid">
             <div className="balance-card">
-              <div className="bc-title">Total del mes</div>
+              <div className="bc-title">Total</div>
               <div className="bc-value">{monthlyTotalReal}</div>
             </div>
             <div className="balance-card">
@@ -475,43 +325,13 @@ export default function App() {
               <div className="bc-value">{longestStreak} días</div>
             </div>
           </div>
-          <div className="hint small">La racha crece si sumás >0 pts día a día.</div>
         </Modal>
       )}
 
-      {/* Pop-up confirmatorio de reinicio */}
-      {confirmReset && (
-        <Modal
-          title="🔄 Confirmar reinicio"
-          onClose={() => setConfirmReset(null)}
-        >
-          <p>
-            {confirmReset === "daily" && "¿Querés reiniciar los puntos de hoy?"}
-            {confirmReset === "weekly" && "¿Querés reiniciar los puntos semanales?"}
-            {confirmReset === "monthly" && "¿Querés reiniciar los puntos del mes?"}
-          </p>
-          <div className="confirm-row">
-            <button className="confirm danger" onClick={confirmResetAction}>Sí, reiniciar</button>
-            <button className="confirm" onClick={() => setConfirmReset(null)}>Cancelar</button>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
-      {/* Footer (sumamos botón de frecuencia) */}
-      <div className="footer-buttons">
-        <button className="circle-btn" onClick={() => setShowSettings(true)} title="Ajustes">⚙️</button>
-        <button className="circle-btn" onClick={() => setShowProgress(true)} title="Gráficos">📈</button>
-        <button className="circle-btn" onClick={() => setShowBalance(true)} title="Balance mensual">📜</button>
-        <button className="circle-btn" onClick={() => setShowFrequency(true)} title="Frecuencia de acciones">📊</button>
-      </div>
-
-      {/* Modal Frecuencia */}
       {showFrequency && (
         <Modal title="📊 Frecuencia de hábitos" onClose={() => setShowFrequency(false)}>
           {freqStats.length === 0 ? (
-            <p>No hay suficientes datos aún. Empezá a registrar tus hábitos.</p>
+            <p>No hay datos suficientes aún.</p>
           ) : (
             <div className="freq-list">
               {freqStats.map((f) => (
@@ -522,9 +342,7 @@ export default function App() {
                     <div className="freq-bar">
                       <div className="freq-fill" style={{ width: `${Math.min(100, f.count30 * 3)}%` }} />
                     </div>
-                    <div className="freq-sub">
-                      {f.count7} veces / 7 días • {f.count30} / 30 días
-                    </div>
+                    <div className="freq-sub">{f.count7} veces / 7 días • {f.count30} / 30 días</div>
                   </div>
                 </div>
               ))}
@@ -532,3 +350,6 @@ export default function App() {
           )}
         </Modal>
       )}
+    </div>
+  );
+}
