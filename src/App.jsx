@@ -222,11 +222,77 @@ export default function App() {
     }, 1200);
   };
 
+  // 🔄 Corrección: borrar entradas del día (ahora descuenta del semanal y mensual)
   const clearToday = () => {
-    // borra solo lo del día actual
+    const ptsToday = history[todayKey] || 0;
     setDailyPoints(0);
-    setHistory((h) => ({ ...h, [todayKey]: 0 }));
+    setWeeklyPoints((p) => Math.max(0, p - ptsToday));
+    setMonthlyPoints((p) => Math.max(0, p - ptsToday));
+    setHistory((h) => {
+      const next = { ...h };
+      delete next[todayKey];
+      return next;
+    });
   };
+
+  // 🧭 Registro de acciones para estadísticas de frecuencia
+  const [actionLog, setActionLog] = useState([]); // [{date, label, pts}]
+  const [showFrequency, setShowFrequency] = useState(false);
+
+  // Guardar acción al presionar botón
+  const addPoints = (pts, label) => {
+    setDailyPoints((p) => p + pts);
+    setWeeklyPoints((p) => p + pts);
+    setMonthlyPoints((p) => p + pts);
+    setHistory((h) => ({ ...h, [todayKey]: (h[todayKey] || 0) + pts }));
+    setActionLog((a) => [...a, { date: todayKey, label, pts }]);
+
+    // +puntos flotantes
+    const id = (floaterId = floaterId + 1);
+    setFloaters((arr) => [...arr, { id, text: `+${pts}` }]);
+    setTimeout(() => setFloaters((arr) => arr.filter((f) => f.id !== id)), 1200);
+  };
+
+  // Frecuencia últimos 7 y 30 días
+  const freqStats = useMemo(() => {
+    const last7Days = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 7);
+    const last30Days = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 30);
+    const byLabel = {};
+
+    for (const a of actionLog) {
+      const d = new Date(a.date);
+      if (!byLabel[a.label]) byLabel[a.label] = { count7: 0, count30: 0 };
+      if (d >= last30Days) byLabel[a.label].count30++;
+      if (d >= last7Days) byLabel[a.label].count7++;
+    }
+
+    return Object.entries(byLabel)
+      .map(([label, counts]) => ({
+        label,
+        count7: counts.count7,
+        count30: counts.count30,
+        icon: activities.find((x) => x.label === label)?.icon || "⭐",
+      }))
+      .sort((a, b) => b.count30 - a.count30);
+  }, [actionLog, todayKey]);
+
+  // Persistencia extendida con actionLog
+  useEffect(() => {
+    const raw = localStorage.getItem("dp_v3");
+    if (raw) {
+      try {
+        const s = JSON.parse(raw);
+        if (Array.isArray(s.actionLog)) setActionLog(s.actionLog);
+      } catch {}
+    }
+  }, []);
+  useEffect(() => {
+    const raw = localStorage.getItem("dp_v3");
+    const s = raw ? JSON.parse(raw) : {};
+    s.actionLog = actionLog;
+    localStorage.setItem("dp_v3", JSON.stringify(s));
+  }, [actionLog]);
+
 
   // Confirmaciones de reset (inteligente semanal/mensual)
   const confirmResetAction = () => {
@@ -433,3 +499,36 @@ export default function App() {
     </div>
   );
 }
+      {/* Footer (sumamos botón de frecuencia) */}
+      <div className="footer-buttons">
+        <button className="circle-btn" onClick={() => setShowSettings(true)} title="Ajustes">⚙️</button>
+        <button className="circle-btn" onClick={() => setShowProgress(true)} title="Gráficos">📈</button>
+        <button className="circle-btn" onClick={() => setShowBalance(true)} title="Balance mensual">📜</button>
+        <button className="circle-btn" onClick={() => setShowFrequency(true)} title="Frecuencia de acciones">📊</button>
+      </div>
+
+      {/* Modal Frecuencia */}
+      {showFrequency && (
+        <Modal title="📊 Frecuencia de hábitos" onClose={() => setShowFrequency(false)}>
+          {freqStats.length === 0 ? (
+            <p>No hay suficientes datos aún. Empezá a registrar tus hábitos.</p>
+          ) : (
+            <div className="freq-list">
+              {freqStats.map((f) => (
+                <div key={f.label} className="freq-item">
+                  <div className="freq-icon">{f.icon}</div>
+                  <div className="freq-info">
+                    <div className="freq-label">{f.label}</div>
+                    <div className="freq-bar">
+                      <div className="freq-fill" style={{ width: `${Math.min(100, f.count30 * 3)}%` }} />
+                    </div>
+                    <div className="freq-sub">
+                      {f.count7} veces / 7 días • {f.count30} / 30 días
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
