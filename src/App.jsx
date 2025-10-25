@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import "./App.css";
 
 export default function App() {
   const [dailyPoints, setDailyPoints] = useState(0);
   const [weeklyPoints, setWeeklyPoints] = useState(0);
-  const [level, setLevel] = useState(1);
   const [expPercent, setExpPercent] = useState(0);
 
   const activities = [
@@ -18,7 +17,7 @@ export default function App() {
     { label: "Aprendí algo", pts: 5 },
   ];
 
-  // 🖼️ Fondos por nivel
+  // 🖼️ Fondos por nivel (1..6)
   const levelBackgrounds = {
     1: "/assets/backgrounds/bg1_forest.png",
     2: "/assets/backgrounds/bg2_village.png",
@@ -28,7 +27,7 @@ export default function App() {
     6: "/assets/backgrounds/bg6_legend.png",
   };
 
-  // ⚡ Pre-carga de fondos para evitar parpadeos
+  // ⚡ Pre-carga de fondos
   useEffect(() => {
     Object.values(levelBackgrounds).forEach((src) => {
       const img = new Image();
@@ -36,32 +35,53 @@ export default function App() {
     });
   }, []);
 
-  // 🧠 Cargar puntos guardados
-  useEffect(() => {
-    const savedDaily = localStorage.getItem("dailyPoints");
-    const savedWeekly = localStorage.getItem("weeklyPoints");
-    const savedLevel = localStorage.getItem("level");
-
-    if (savedDaily) setDailyPoints(parseInt(savedDaily));
-    if (savedWeekly) setWeeklyPoints(parseInt(savedWeekly));
-    if (savedLevel) setLevel(parseInt(savedLevel));
+  // 📆 Nivel por día del mes (6 tramos)
+  const { level, day, daysInMonth } = useMemo(() => {
+    const now = new Date();
+    const d = now.getDate();
+    const mDays = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const segment = Math.ceil(mDays / 6);        // tamaño del tramo
+    const idx = Math.min(5, Math.floor((d - 1) / segment)); // 0..5
+    return { level: idx + 1, day: d, daysInMonth: mDays };
   }, []);
 
-  // 💾 Guardar automáticamente y calcular nivel/XP
+  // 🎯 Objetivo diario por etapa (80%, 90%, 100%, 110%, 120%, 100% del base)
+  const stagePercents = [0.8, 0.9, 1.0, 1.1, 1.2, 1.0];
+  const baseDailyTarget = 50; // suma “ideal” de hábitos en un día
+  const levelTarget = Math.max(
+    10,
+    Math.round(baseDailyTarget * stagePercents[level - 1])
+  );
+
+  // 🧠 Cargar/guardar puntos
   useEffect(() => {
-    localStorage.setItem("dailyPoints", dailyPoints);
-    localStorage.setItem("weeklyPoints", weeklyPoints);
-    localStorage.setItem("level", level);
-
-    const maxPoints = 100;
-    const percentage = Math.min((dailyPoints / maxPoints) * 100, 100);
-    setExpPercent(percentage);
-
-    if (percentage === 100) {
-      setLevel((l) => (l < 6 ? l + 1 : 1)); // ciclo de 6 niveles
+    const saved = JSON.parse(localStorage.getItem("diego_plus_daily") || "{}");
+    const todayKey = new Date().toLocaleDateString();
+    if (saved.todayKey === todayKey) {
+      if (typeof saved.dailyPoints === "number") setDailyPoints(saved.dailyPoints);
+      if (typeof saved.weeklyPoints === "number") setWeeklyPoints(saved.weeklyPoints);
+    } else {
+      // nuevo día → reset diario, mantengo semanal
       setDailyPoints(0);
+      localStorage.setItem(
+        "diego_plus_daily",
+        JSON.stringify({ todayKey, dailyPoints: 0, weeklyPoints: saved.weeklyPoints || 0 })
+      );
     }
+  }, []);
+
+  useEffect(() => {
+    const todayKey = new Date().toLocaleDateString();
+    const saved = JSON.parse(localStorage.getItem("diego_plus_daily") || "{}");
+    const updated = { ...saved, todayKey, dailyPoints, weeklyPoints };
+    localStorage.setItem("diego_plus_daily", JSON.stringify(updated));
   }, [dailyPoints, weeklyPoints]);
+
+  // 🧪 XP segun objetivo de la etapa (NO cambia el nivel)
+  useEffect(() => {
+    const pct = Math.min(100, Math.round((dailyPoints / levelTarget) * 100));
+    setExpPercent(pct);
+  }, [dailyPoints, levelTarget]);
 
   // ➕ Sumar puntos
   const addPoints = (pts) => {
@@ -69,38 +89,29 @@ export default function App() {
     setWeeklyPoints((p) => p + pts);
   };
 
-  // 🏔️ Nombre del nivel actual
   const getLevelName = () => {
     switch (level) {
-      case 1:
-        return "El llamado a la aventura";
-      case 2:
-        return "Primeros pasos";
-      case 3:
-        return "El camino de las pruebas";
-      case 4:
-        return "Frente al abismo";
-      case 5:
-        return "Salto de fe";
-      case 6:
-        return "La gloria eterna";
-      default:
-        return "Nuevo ciclo";
+      case 1: return "El llamado a la aventura";
+      case 2: return "Primeros pasos";
+      case 3: return "El camino de las pruebas";
+      case 4: return "Frente al abismo";
+      case 5: return "Salto de fe";
+      case 6: return "La gloria eterna";
+      default: return "Nuevo ciclo";
     }
   };
 
   return (
     <div
       className="game-container"
-      style={{
-        backgroundImage: `url(${levelBackgrounds[level]})`,
-      }}
+      style={{ backgroundImage: `url(${levelBackgrounds[level]})` }}
     >
-      {/* 🧾 Encabezado y barra de experiencia */}
+      {/* HUD */}
       <div className="hud">
         <h1 className="title">
           Nivel {level}: {getLevelName()}
         </h1>
+        <div className="subtle">{`Día ${day} / ${daysInMonth}`}</div>
 
         <div className="scoreboard">
           <div className="points">
@@ -111,38 +122,31 @@ export default function App() {
         </div>
 
         <div className="xp-bar">
-          <div className="xp-fill" style={{ width: `${expPercent}%` }}></div>
+          <div className="xp-fill" style={{ width: `${expPercent}%` }} />
         </div>
+        <div className="target-note">Objetivo de hoy: {levelTarget} pts</div>
       </div>
 
-      {/* 🦸‍♂️ Personaje */}
+      {/* Personaje */}
       <div className="character-section">
-        <img
-          src="/assets/hero.gif"
-          alt="Héroe de Diego"
-          className="hero-sprite"
-        />
+        <img src="/assets/hero.gif" alt="Héroe de Diego" className="hero-sprite" />
       </div>
 
-      {/* 🎯 Botones de actividades */}
+      {/* Actividades */}
       <div className="buttons-grid">
         {activities.map((a) => (
-          <button
-            key={a.label}
-            onClick={() => addPoints(a.pts)}
-            className="activity-btn"
-          >
+          <button key={a.label} onClick={() => addPoints(a.pts)} className="activity-btn">
             {a.label}
             <div className="pts">+{a.pts}</div>
           </button>
         ))}
       </div>
 
-      {/* ⚙️ Botones inferiores */}
+      {/* Footer */}
       <div className="footer-buttons">
-        <button className="circle-btn">⚙️</button>
-        <button className="circle-btn">📈</button>
-        <button className="circle-btn">📜</button>
+        <button className="circle-btn" title="Ajustes">⚙️</button>
+        <button className="circle-btn" title="Gráficos">📈</button>
+        <button className="circle-btn" title="Historial">📜</button>
       </div>
     </div>
   );
